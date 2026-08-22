@@ -1,15 +1,9 @@
 services:
   - type: web
     name: smsgateway-backend
-    runtime: node
+    runtime: docker
     plan: free
-    buildCommand: |
-      apt-get update && apt-get install -y openssl libssl-dev && \
-      npm install && \
-      npx prisma generate && \
-      npm run build
-    startCommand: npx prisma migrate deploy && node dist/main.js
-    healthCheckPath: /api/v1/health
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: DATABASE_URL
         sync: false
