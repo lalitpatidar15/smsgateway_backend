@@ -1,9 +1,11 @@
 services:
   - type: web
     name: smsgateway-backend
-    runtime: docker
+    runtime: node
     plan: free
-    dockerfilePath: ./Dockerfile
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/main.js
+    healthCheckPath: /api/v1/health
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -27,3 +29,37 @@ services:
         value: production
       - key: CORS_ORIGINS
         value: "*"
+      - key: GATEWAY_TOKEN_PREFIX
+        value: "gw_"
+      - key: API_KEY_PREFIX
+        value: "sg_live_"
+      - key: HEARTBEAT_ONLINE_THRESHOLD_MS
+        value: "60000"
+      - key: HEARTBEAT_DEGRADED_THRESHOLD_MS
+        value: "300000"
+      - key: CLAIM_EXPIRY_MINUTES
+        value: "2"
+      - key: SMS_MAX_ATTEMPTS
+        value: "3"
+      - key: SMS_RETRY_DELAYS_MS
+        value: "30000,120000,600000"
+      - key: RATE_LIMIT_SMS_PER_MINUTE
+        value: "100"
+      - key: RATE_LIMIT_RECIPIENT_PER_HOUR
+        value: "5"
+      - key: RATE_LIMIT_GATEWAY_PER_MINUTE
+        value: "20"
+      - key: DAILY_SMS_LIMIT_PER_API_KEY
+        value: "500"
+      - key: DAILY_SMS_LIMIT_PER_GATEWAY
+        value: "2000"
+      - key: BULK_SMS_MAX_MESSAGES
+        value: "100"
+      - key: WEBHOOK_MAX_ATTEMPTS
+        value: "5"
+      - key: WEBHOOK_RETRY_DELAYS_MS
+        value: "60000,300000,1800000,7200000"
+      - key: PRISMA_CLI_QUERY_ENGINE_TYPE
+        value: library
+      - key: PRISMA_QUERY_ENGINE_LIBRARY
+        value: libquery_engine-debian-openssl-1.1.x.so.node
