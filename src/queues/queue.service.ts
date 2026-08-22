@@ -16,8 +16,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const host = this.configService.get('REDIS_HOST', 'localhost');
     const port = this.configService.get('REDIS_PORT', 6379);
     const password = this.configService.get('REDIS_PASSWORD');
+    const tls = host !== 'localhost' ? {} : undefined;
 
-    this.connection = new Redis({ host, port, password: password || undefined, maxRetriesPerRequest: null });
+    this.connection = new Redis({ host, port, password: password || undefined, tls, maxRetriesPerRequest: null });
 
     this.createQueue('sms-dispatch');
     this.createQueue('sms-retry');

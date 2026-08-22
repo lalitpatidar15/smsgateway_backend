@@ -13,9 +13,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const host = this.configService.get('REDIS_HOST', 'localhost');
     const port = this.configService.get('REDIS_PORT', 6379);
     const password = this.configService.get('REDIS_PASSWORD');
+    const tls = host !== 'localhost' ? {} : undefined;
 
-    this.client = new Redis({ host, port, password: password || undefined });
-    this.subscriber = new Redis({ host, port, password: password || undefined });
+    this.client = new Redis({ host, port, password: password || undefined, tls, maxRetriesPerRequest: null });
+    this.subscriber = new Redis({ host, port, password: password || undefined, tls, maxRetriesPerRequest: null });
   }
 
   async onModuleDestroy() {
