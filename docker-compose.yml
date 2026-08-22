@@ -4,15 +4,19 @@ services:
     container_name: sms-gateway-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sms_gateway
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-sms_gateway}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sms_gateway}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,16 +42,26 @@ services:
     container_name: sms-gateway-backend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
+
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/sms_gateway?schema=public"
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: "your-super-secret-jwt-key-change-in-production"
-      ADMIN_DEFAULT_EMAIL: "admin@example.com"
-      ADMIN_DEFAULT_PASSWORD: "admin123"
+      # Local Docker default:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/sms_gateway?schema=public}
+
+      # Local Docker Redis
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+      # Application
+      JWT_SECRET: ${JWT_SECRET:-change-this-local-secret}
+
+      ADMIN_DEFAULT_EMAIL: ${ADMIN_DEFAULT_EMAIL:-admin@example.com}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin123}
+
       APP_PORT: 3000
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
+
     depends_on:
       postgres:
         condition: service_healthy
