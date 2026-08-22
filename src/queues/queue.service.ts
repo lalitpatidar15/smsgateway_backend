@@ -13,12 +13,25 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
-    const host = this.configService.get('REDIS_HOST', 'localhost');
-    const port = this.configService.get('REDIS_PORT', 6379);
-    const password = this.configService.get('REDIS_PASSWORD');
-    const tls = host !== 'localhost' ? {} : undefined;
+    const redisUrl = this.configService.get('REDIS_URL');
 
-    this.connection = new Redis({ host, port, password: password || undefined, tls, maxRetriesPerRequest: null });
+    if (redisUrl) {
+      this.connection = new Redis(redisUrl, {
+        maxRetriesPerRequest: null,
+        tls: redisUrl.startsWith('rediss') ? {} : undefined,
+      });
+    } else {
+      const host = this.configService.get('REDIS_HOST', 'localhost');
+      const port = this.configService.get('REDIS_PORT', 6379);
+      const password = this.configService.get('REDIS_PASSWORD');
+      this.connection = new Redis({
+        host,
+        port,
+        password: password || undefined,
+        tls: host !== 'localhost' ? {} : undefined,
+        maxRetriesPerRequest: null,
+      });
+    }
 
     this.createQueue('sms-dispatch');
     this.createQueue('sms-retry');
