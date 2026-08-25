@@ -3,9 +3,9 @@ services:
     name: smsgateway-backend
     runtime: node
     plan: free
-    buildCommand: npm install && npx prisma generate && ./node_modules/.bin/nest build
-    startCommand: NODE_OPTIONS="--max-old-space-size=512" npx nest start --watch=false
-    healthCheckPath: /api/v1/health
+    buildCommand: npm install && npx prisma generate
+    startCommand: NODE_OPTIONS="--max-old-space-size=512" node dist/index.js
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromService:
@@ -16,10 +16,6 @@ services:
           name: smsgateway-redis
           property: externalUrl
       - key: JWT_SECRET
-        generateValue: true
-      - key: ADMIN_DEFAULT_EMAIL
-        value: admin@example.com
-      - key: ADMIN_DEFAULT_PASSWORD
         generateValue: true
       - key: NODE_ENV
         value: production

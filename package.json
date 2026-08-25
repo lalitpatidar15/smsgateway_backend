@@ -1,39 +1,43 @@
 {
   "name": "sms-gateway-backend",
   "version": "1.0.0",
-  "description": "SMS Gateway Backend - NestJS + PostgreSQL + Prisma",
+  "description": "SMS Gateway Backend - Node.js + Express + PostgreSQL + Prisma + Redis",
   "private": true,
   "license": "MIT",
   "scripts": {
     "build": "nest build",
-    "start": "node dist/main.js",
-    "start:dev": "nest start --watch",
-    "start:prod": "node dist/main.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:migrate:prod": "prisma migrate deploy",
-    "prisma:seed": "prisma db seed"
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
+    "postinstall": "prisma generate",
+    "postgres": "docker exec -i sms-gateway-postgres psql -U postgres -d sms_gateway",
+    "studio": "prisma studio"
   },
   "dependencies": {
-    "@nestjs/common": "^10.4.0",
-    "@nestjs/config": "^3.2.0",
-    "@nestjs/core": "^10.4.0",
-    "@nestjs/platform-express": "^10.4.0",
     "@prisma/client": "^5.19.0",
-    "class-transformer": "^0.5.1",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.12.0",
     "class-validator": "^0.14.1",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1",
-    "zod": "^3.23.0"
+    "config": "^3.3.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.11.9",
+    "nanoid": "^3.3.7",
+    "luxon": "^3.4.4",
+    "pg": "^8.11.3",
+    "winston": "^3.14.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
-    "@nestjs/cli": "^10.4.0",
-    "@nestjs/schematics": "^10.1.0",
-    "@types/node": "^22.5.0",
+    "@types/express": "^4.17.21",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.10",
+    "@types/passport-jwt": "^4.0.1",
+    "nodemon": "^3.1.4",
     "prisma": "^5.19.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.0"
-  },
-  "prisma": {
-    "seed": "ts-node prisma/seed.ts"
   }
 }
