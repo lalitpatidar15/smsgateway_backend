@@ -10,6 +10,10 @@
     "declaration": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "lib": ["ES2021", "dom"]
-  }
+    "lib": ["ES2021"],
+    "paths": {
+      "~/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"]
 }

@@ -1,19 +1,21 @@
 import 'dotenv/config';
+
 import express from 'express';
 import helmet from 'helmet';
-import redis from 'ioredis';
+import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 
 const app = express();
 const prisma = new PrismaClient();
-const redisClient = new redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 app.use(helmet());
+app.use(cors());
 app.use(express.json());
 
 // Health check
 app.get('/health', async (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const postgres = await prisma.$queryRaw`SELECT 1`.then(() => 'ok').catch(() => 'error');
+  res.json({ status: postgres === 'ok' ? 'ok' : 'degraded', timestamp: new Date().toISOString() });
 });
 
 // SMS routes
@@ -31,13 +33,14 @@ app.post('/sms', async (req, res) => {
     },
   });
   
-  res.json({ id: job.id, status: job.status });
+  res.json({ id: job.id, status: job.status, recipient: job.recipient });
 });
 
 // List SMS jobs
 app.get('/sms', async (req, res) => {
+  const limit = Number(process.env.LIMIT || 50);
   const jobs = await prisma.smsJob.findMany({
-    take: 50,
+    take: limit,
     orderBy: { createdAt: 'desc' },
   });
   res.json(jobs);
@@ -62,10 +65,13 @@ app.post('/sms/:id/cancel', async (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || process.env.APP_PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`SMS Gateway running on port ${PORT}`);
-  // Prisma migrate would be run separately
+  console.log(`SMS Gateway Backend running on port ${PORT}`);
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('Database connected');
+  } catch (e: unknown) {
+    console.error('Database connection failed:', (e as Error).message);
+  }
 });
-
-export { app };
