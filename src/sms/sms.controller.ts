@@ -1,74 +1,57 @@
-import { Controller, Post, Get, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiSecurity, ApiQuery } from '@nestjs/swagger';
+import { Controller, Post, Get, Body, Param, Query, Headers, HttpCode, HttpStatus } from '@nestjs/common';
 import { SmsService } from './sms.service';
-import { SmsDispatcherService } from './sms-dispatcher.service';
-import { CreateSmsDto, CreateBulkSmsDto, SmsQueryDto } from './dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { GatewayAuthGuard } from '../gateways/gateway-auth.guard';
+import { DeviceService } from '../device/device.service';
 
-@ApiTags('SMS')
 @Controller('sms')
 export class SmsController {
   constructor(
     private smsService: SmsService,
-    private smsDispatcherService: SmsDispatcherService,
+    private deviceService: DeviceService,
   ) {}
 
-  @Post()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a new SMS job' })
-  async create(@Body() dto: CreateSmsDto, @Req() req: any) {
-    dto._apiKeyId = req.user?.apiKeyId;
-    return this.smsService.create(dto);
+  @Post('send')
+  async send(@Body() body: { phone_number: string; message: string; device_id?: string }) {
+    return this.smsService.send(body);
   }
 
-  @Post('bulk')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create bulk SMS jobs' })
-  async createBulk(@Body() dto: CreateBulkSmsDto, @Req() req: any) {
-    dto._apiKeyId = req.user?.apiKeyId;
-    return this.smsService.createBulk(dto);
+  @Get('jobs/pending')
+  async getPending(
+    @Headers('authorization') auth: string,
+    @Query('limit') limit?: string,
+  ) {
+    const token = auth?.replace('Bearer ', '');
+    const device = await this.deviceService.authenticate(token);
+    return this.smsService.getPending(device.deviceId, limit ? parseInt(limit) : 5);
   }
 
-  @Get()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List SMS jobs' })
-  async findAll(@Query() query: SmsQueryDto) {
-    return this.smsService.findAll(query);
+  @Post('jobs/:id/processing')
+  @HttpCode(HttpStatus.OK)
+  async markProcessing(
+    @Param('id') id: string,
+    @Headers('authorization') auth: string,
+  ) {
+    const token = auth?.replace('Bearer ', '');
+    const device = await this.deviceService.authenticate(token);
+    return this.smsService.markProcessing(id, device.deviceId);
   }
 
-  @Get(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get SMS job details' })
-  async findOne(@Param('id') id: string) {
-    return this.smsService.findOne(id);
+  @Post('jobs/:id/sent')
+  @HttpCode(HttpStatus.OK)
+  async markSent(@Param('id') id: string) {
+    return this.smsService.markSent(id);
   }
 
-  @Post(':id/cancel')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cancel an SMS job' })
-  async cancel(@Param('id') id: string) {
-    return this.smsService.cancel(id);
+  @Post('jobs/:id/failed')
+  @HttpCode(HttpStatus.OK)
+  async markFailed(
+    @Param('id') id: string,
+    @Body() body: { error: string },
+  ) {
+    return this.smsService.markFailed(id, body.error);
   }
 
-  @Post('dispatch')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Manually trigger dispatch (admin)' })
-  async dispatch() {
-    return this.smsDispatcherService.dispatchQueuedMessages();
-  }
-
-  @Post('recover-claims')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Recover expired claims (admin)' })
-  async recoverClaims() {
-    return this.smsDispatcherService.recoverExpiredClaims();
+  @Get('stats')
+  async getStats() {
+    return this.smsService.getStats();
   }
 }

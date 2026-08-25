@@ -3,59 +3,17 @@ services:
     name: smsgateway-backend
     runtime: node
     plan: free
-    buildCommand: NODE_OPTIONS="--max-old-space-size=1024" npm install && NODE_OPTIONS="--max-old-space-size=1024" npx prisma generate && NODE_OPTIONS="--max-old-space-size=1024" npm run build
-    startCommand: NODE_OPTIONS="--max-old-space-size=512" nest start
-    healthCheckPath: /api/v1/health
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/main.js
+    healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         fromService:
           name: smsgateway-db
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: smsgateway-redis
-          property: externalUrl
-      - key: JWT_SECRET
-        generateValue: true
-      - key: ADMIN_DEFAULT_EMAIL
-        value: admin@example.com
-      - key: ADMIN_DEFAULT_PASSWORD
-        generateValue: true
-      - key: NODE_ENV
-        value: production
-      - key: APP_PORT
+      - key: PORT
         value: "10000"
-      - key: APP_ENV
+      - key: NODE_ENV
         value: production
       - key: CORS_ORIGINS
         value: "*"
-      - key: GATEWAY_TOKEN_PREFIX
-        value: "gw_"
-      - key: API_KEY_PREFIX
-        value: "sg_live_"
-      - key: HEARTBEAT_ONLINE_THRESHOLD_MS
-        value: "60000"
-      - key: HEARTBEAT_DEGRADED_THRESHOLD_MS
-        value: "300000"
-      - key: CLAIM_EXPIRY_MINUTES
-        value: "2"
-      - key: SMS_MAX_ATTEMPTS
-        value: "3"
-      - key: SMS_RETRY_DELAYS_MS
-        value: "30000,120000,600000"
-      - key: RATE_LIMIT_SMS_PER_MINUTE
-        value: "100"
-      - key: RATE_LIMIT_RECIPIENT_PER_HOUR
-        value: "5"
-      - key: RATE_LIMIT_GATEWAY_PER_MINUTE
-        value: "20"
-      - key: DAILY_SMS_LIMIT_PER_API_KEY
-        value: "500"
-      - key: DAILY_SMS_LIMIT_PER_GATEWAY
-        value: "2000"
-      - key: BULK_SMS_MAX_MESSAGES
-        value: "100"
-      - key: WEBHOOK_MAX_ATTEMPTS
-        value: "5"
-      - key: WEBHOOK_RETRY_DELAYS_MS
-        value: "60000,300000,1800000,7200000"
