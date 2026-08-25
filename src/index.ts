@@ -24,16 +24,16 @@ app.post('/sms', async (req, res) => {
   if (!to || !message) {
     return res.status(400).json({ error: 'phone number and message required' });
   }
-  
+
   const job = await prisma.smsJob.create({
     data: {
-      recipient: to,
+      phoneNumber: to,
       message,
       status: 'QUEUED',
     },
   });
-  
-  res.json({ id: job.id, status: job.status, recipient: job.recipient });
+
+  res.json({ id: job.id, status: job.status, recipient: job.phoneNumber });
 });
 
 // List SMS jobs
