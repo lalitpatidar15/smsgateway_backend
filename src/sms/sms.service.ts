@@ -5,33 +5,28 @@ import { PrismaService } from '../config/prisma.service';
 export class SmsService {
   constructor(private prisma: PrismaService) {}
 
-  async send(data: { phone_number: string; message: string; device_id?: string }) {
+  async send(data: { phone_number: string; message: string }) {
     const job = await this.prisma.smsJob.create({
       data: {
-        phoneNumber: data.phone_number,
+        recipient: data.phone_number,
         message: data.message,
-        deviceId: data.device_id,
-        status: 'pending',
+        status: 'QUEUED',
       },
     });
 
     return {
       id: job.id,
-      phone_number: job.phoneNumber,
+      recipient: job.recipient,
       message: job.message,
       status: job.status,
-      created_at: job.createdAt,
+      createdAt: job.createdAt,
     };
   }
 
-  async getPending(deviceId: string, limit: number = 5) {
+  async getPending(limit: number = 5) {
     const jobs = await this.prisma.smsJob.findMany({
       where: {
-        status: 'pending',
-        OR: [
-          { deviceId: null },
-          { deviceId },
-        ],
+        status: 'QUEUED',
       },
       orderBy: { createdAt: 'asc' },
       take: limit,
@@ -39,12 +34,12 @@ export class SmsService {
 
     return jobs.map(job => ({
       id: job.id,
-      phone_number: job.phoneNumber,
+      recipient: job.recipient,
       message: job.message,
     }));
   }
 
-  async markProcessing(jobId: string, deviceId: string) {
+  async markProcessing(jobId: string) {
     const job = await this.prisma.smsJob.findUnique({
       where: { id: jobId },
     });
@@ -53,18 +48,16 @@ export class SmsService {
       throw new NotFoundException('Job not found');
     }
 
-    if (job.status !== 'pending') {
+    if (job.status !== 'QUEUED') {
       throw new ConflictException(`Job is already ${job.status}`);
     }
 
     return this.prisma.smsJob.update({
       where: { id: jobId },
       data: {
-        status: 'processing',
-        deviceId,
+        status: 'RETRYING',
         attemptCount: { increment: 1 },
-        lastAttemptAt: new Date(),
-      },
+              },
     });
   }
 
@@ -80,7 +73,7 @@ export class SmsService {
     return this.prisma.smsJob.update({
       where: { id: jobId },
       data: {
-        status: 'sent',
+        status: 'SENT',
         sentAt: new Date(),
       },
     });
@@ -95,31 +88,33 @@ export class SmsService {
       throw new NotFoundException('Job not found');
     }
 
-    const maxAttempts = 3;
-    const newStatus = job.attemptCount >= maxAttempts ? 'failed' : 'pending';
-
     return this.prisma.smsJob.update({
       where: { id: jobId },
       data: {
-        status: newStatus,
-        errorMessage: error,
-        failedAt: newStatus === 'failed' ? new Date() : null,
-        nextAttemptAt: newStatus === 'pending'
-          ? new Date(Date.now() + 30000 * Math.pow(2, job.attemptCount))
-          : null,
+        status: 'FAILED',
+        failedAt: new Date(),
+        lastErrorCode: error,
+        lastErrorMessage: error,
       },
     });
   }
 
   async getStats() {
-    const [total, pending, processing, sent, failed] = await Promise.all([
-      this.prisma.smsJob.count(),
-      this.prisma.smsJob.count({ where: { status: 'pending' } }),
-      this.prisma.smsJob.count({ where: { status: 'processing' } }),
-      this.prisma.smsJob.count({ where: { status: 'sent' } }),
-      this.prisma.smsJob.count({ where: { status: 'failed' } }),
+    const [total, queued, sent, delivered, failed] = await Promise.all([
+      this.prisma.smsJob.count({ where: {} }),
+      this.prisma.smsJob.count({ where: { status: 'QUEUED' } }),
+      this.prisma.smsJob.count({ where: { status: 'SENT' } }),
+      this.prisma.smsJob.count({ where: { status: 'DELIVERED' } }),
+      this.prisma.smsJob.count({ where: { status: 'FAILED' } }),
     ]);
 
-    return { total, pending, processing, sent, failed };
+    return {
+      total,
+      queued,
+      sent,
+      delivered,
+      failed,
+      deliveryRate: total > 0 ? (delivered / total * 100).toFixed(2) : '0',
+    };
   }
 }

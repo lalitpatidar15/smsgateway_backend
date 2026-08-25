@@ -1,16 +1,12 @@
 import { Controller, Post, Get, Body, Param, Query, Headers, HttpCode, HttpStatus } from '@nestjs/common';
 import { SmsService } from './sms.service';
-import { DeviceService } from '../device/device.service';
 
 @Controller('sms')
 export class SmsController {
-  constructor(
-    private smsService: SmsService,
-    private deviceService: DeviceService,
-  ) {}
+  constructor(private smsService: SmsService) {}
 
   @Post('send')
-  async send(@Body() body: { phone_number: string; message: string; device_id?: string }) {
+  async send(@Body() body: { phone_number: string; message: string }) {
     return this.smsService.send(body);
   }
 
@@ -19,20 +15,14 @@ export class SmsController {
     @Headers('authorization') auth: string,
     @Query('limit') limit?: string,
   ) {
-    const token = auth?.replace('Bearer ', '');
-    const device = await this.deviceService.authenticate(token);
-    return this.smsService.getPending(device.deviceId, limit ? parseInt(limit) : 5);
+    const numericLimit = limit ? parseInt(limit, 10) : 5;
+    return this.smsService.getPending(numericLimit);
   }
 
   @Post('jobs/:id/processing')
   @HttpCode(HttpStatus.OK)
-  async markProcessing(
-    @Param('id') id: string,
-    @Headers('authorization') auth: string,
-  ) {
-    const token = auth?.replace('Bearer ', '');
-    const device = await this.deviceService.authenticate(token);
-    return this.smsService.markProcessing(id, device.deviceId);
+  async markProcessing(@Param('id') id: string) {
+    return this.smsService.markProcessing(id);
   }
 
   @Post('jobs/:id/sent')
@@ -43,10 +33,7 @@ export class SmsController {
 
   @Post('jobs/:id/failed')
   @HttpCode(HttpStatus.OK)
-  async markFailed(
-    @Param('id') id: string,
-    @Body() body: { error: string },
-  ) {
+  async markFailed(@Param('id') id: string, @Body() body: { error: string }) {
     return this.smsService.markFailed(id, body.error);
   }
 
