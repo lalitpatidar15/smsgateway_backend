@@ -3,8 +3,8 @@ services:
     name: smsgateway-backend
     runtime: node
     plan: free
-    buildCommand: npm install && npx prisma generate && npx tsc
-    startCommand: NODE_OPTIONS="--max-old-space-size=512" node dist/index.js
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy --accept-data-loss && npx tsc
+    startCommand: NODE_OPTIONS="--max-old-space-size=512" npx ts-node src/index.ts
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
