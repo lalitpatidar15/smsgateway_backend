@@ -5,8 +5,8 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "ts-node src/index.ts",
-    "dev": "ts-node src/index.ts",
+    "start": "npx ts-node src/index.ts",
+    "dev": "npx ts-node src/index.ts",
     "build": "tsc",
     "postinstall": "prisma generate",
     "postgres": "docker exec -i sms-gateway-postgres psql -U postgres -d sms_gateway"
@@ -24,6 +24,7 @@
     "libphonenumber-js": "^1.11.9",
     "luxon": "^3.4.4",
     "pg": "^8.11.3",
+    "ts-node": "^10.9.2",
     "winston": "^3.14.0",
     "winston-daily-rotate-file": "^5.0.0"
   },
@@ -32,7 +33,6 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
     "prisma": "^5.19.0",
-    "ts-node": "^10.9.2",
     "typescript": "^5.5.0"
   }
 }
