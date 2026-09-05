@@ -42,7 +42,7 @@ app.use((req, res, next) => {
 morgan.token('request-id', (req: any) => req.requestId || '-');
 app.use(
   morgan(':method :url :status :response-time ms - :res[content-length] :request-id', {
-    skip: (req) => req.originalUrl === '/health',
+    skip: (req: any) => req.originalUrl === '/health',
     stream: { write: (msg: string) => logger.info('http', { line: msg.trim() }) },
   })
 );
