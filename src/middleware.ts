@@ -8,6 +8,11 @@ import { logger } from './logger';
 
 export interface AuthedRequest extends Request {
   requestId: string;
+  // Declared explicitly (instead of relying on express's Request generics)
+  // so builds are deterministic across @types/express versions.
+  body: any;
+  params: any;
+  query: any;
   admin?: { id: string; email: string; role: string };
   apiKey?: { id: string; name: string; permissions: string[] };
   gateway?: { id: string; deviceId: string; name: string };
