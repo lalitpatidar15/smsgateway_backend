@@ -1,77 +1,107 @@
 import 'dotenv/config';
-
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+import { config } from './config';
+import { logger, logRequest } from './logger';
+import { prisma, checkPostgres } from './db';
+import { requestIdMiddleware, notFound, errorHandler, rateLimit } from './middleware';
+import { healthRouter } from './routes/health';
+import { authRouter } from './routes/auth';
+import { apiKeysRouter } from './routes/apiKeys';
+import { gatewaysRouter } from './routes/gateways';
+import { smsRouter } from './routes/sms';
+import { adminRouter } from './routes/admin';
+import { webhooksRouter } from './routes/webhooks';
+import { legacyRouter } from './routes/legacy';
+import { startScheduler } from './scheduler';
 
 const app = express();
-const prisma = new PrismaClient();
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+const origins = config.corsOrigins === '*' ? '*' : config.corsOrigins.split(',').map((s) => s.trim()).filter(Boolean);
+app.use(
+  cors({
+    origin: origins === '*' ? true : (origins as string[]),
+    credentials: false,
+  })
+);
+app.use(express.json({ limit: '1mb' }));
+app.use(requestIdMiddleware);
+app.use((req, res, next) => {
+  res.setHeader('X-Request-Id', (req as any).requestId);
+  const start = Date.now();
+  res.on('finish', () => logRequest(req, res, Date.now() - start));
+  next();
+});
 
-// Health check
+// Global soft rate limit (abuse floor)
+app.use(rateLimit(() => 'global', 600, 60_000));
+
+// Render / LB health (no /api prefix)
 app.get('/health', async (req, res) => {
-  const postgres = await prisma.$queryRaw`SELECT 1`.then(() => 'ok').catch(() => 'error');
-  res.json({ status: postgres === 'ok' ? 'ok' : 'degraded', timestamp: new Date().toISOString() });
-});
-
-// SMS routes
-app.post('/sms', async (req, res) => {
-  const { to, message } = req.body;
-  if (!to || !message) {
-    return res.status(400).json({ error: 'phone number and message required' });
-  }
-
-  const job = await prisma.smsJob.create({
-    data: {
-      phoneNumber: to,
-      message,
-      status: 'QUEUED',
-    },
+  const postgres = await checkPostgres();
+  res.status(postgres === 'ok' ? 200 : 503).json({
+    status: postgres === 'ok' ? 'ok' : 'degraded',
+    timestamp: new Date().toISOString(),
+    requestId: (req as any).requestId,
   });
-
-  res.json({ id: job.id, status: job.status, recipient: job.phoneNumber });
 });
 
-// List SMS jobs
-app.get('/sms', async (req, res) => {
-  const limit = Number(process.env.LIMIT || 50);
-  const jobs = await prisma.smsJob.findMany({
-    take: limit,
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(jobs);
-});
+// Versioned API
+app.use('/api/v1', healthRouter);
+app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/admin/api-keys', apiKeysRouter);
+app.use('/api/v1/gateways', gatewaysRouter);
+app.use('/api/v1/sms', smsRouter);
+app.use('/api/v1/admin', adminRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
 
-// Get single SMS job
-app.get('/sms/:id', async (req, res) => {
-  const job = await prisma.smsJob.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
-});
+// Legacy compat for current mobile builds + old integrations
+app.use('/', legacyRouter);
 
-// Cancel SMS
-app.post('/sms/:id/cancel', async (req, res) => {
-  const job = await prisma.smsJob.update({
-    where: { id: req.params.id },
-    data: { status: 'CANCELLED' },
-  });
-  res.json(job);
-});
+app.use(notFound);
+app.use(errorHandler);
 
-// Start server
-const PORT = process.env.PORT || process.env.APP_PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`SMS Gateway Backend running on port ${PORT}`);
+async function ensureAdmin() {
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    console.log('Database connected');
-  } catch (e: unknown) {
-    console.error('Database connection failed:', (e as Error).message);
+    const count = await prisma.adminUser.count();
+    if (count === 0) {
+      const hash = await (bcrypt as any).hash(config.adminPassword, 10);
+      await prisma.adminUser.create({
+        data: { email: config.adminEmail.toLowerCase(), password: hash, name: 'Admin', role: 'SUPER_ADMIN' as any },
+      });
+      logger.info('default admin created', { email: config.adminEmail });
+    }
+  } catch (e) {
+    logger.warn('ensureAdmin failed', { error: (e as Error).message });
   }
+}
+
+const PORT = config.port;
+const server = app.listen(PORT, async () => {
+  logger.info(`SMS Gateway Backend listening on ${PORT}`, { env: config.env });
+  const pg = await checkPostgres();
+  logger.info(`postgres: ${pg}`);
+  if (pg !== 'ok') logger.error('Database not reachable — check DATABASE_URL');
+  await ensureAdmin();
+  startScheduler();
 });
+
+function shutdown(signal: string) {
+  logger.info(`received ${signal}, shutting down`);
+  server.close(async () => {
+    await prisma.$disconnect().catch(() => {});
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10000).unref?.();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('unhandledRejection', (err) => logger.error('unhandledRejection', { error: String(err) }));
+
+export default app;

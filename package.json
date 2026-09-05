@@ -5,10 +5,12 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "npx ts-node src/index.ts",
-    "dev": "npx ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy",
     "postgres": "docker exec -i sms-gateway-postgres psql -U postgres -d sms_gateway"
   },
   "dependencies": {
