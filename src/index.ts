@@ -3,10 +3,12 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
+import morgan from 'morgan';
 import { config } from './config';
-import { logger, logRequest } from './logger';
+import { logger } from './logger';
 import { prisma, checkPostgres } from './db';
 import { requestIdMiddleware, notFound, errorHandler, rateLimit } from './middleware';
+import { metricsMiddleware } from './metrics';
 import { healthRouter } from './routes/health';
 import { authRouter } from './routes/auth';
 import { apiKeysRouter } from './routes/apiKeys';
@@ -33,10 +35,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use(requestIdMiddleware);
 app.use((req, res, next) => {
   res.setHeader('X-Request-Id', (req as any).requestId);
-  const start = Date.now();
-  res.on('finish', () => logRequest(req, res, Date.now() - start));
   next();
 });
+
+// HTTP request logging (morgan -> winston). Skips LB health probes to cut noise.
+morgan.token('request-id', (req: any) => req.requestId || '-');
+app.use(
+  morgan(':method :url :status :response-time ms - :res[content-length] :request-id', {
+    skip: (req) => req.originalUrl === '/health',
+    stream: { write: (msg: string) => logger.info('http', { line: msg.trim() }) },
+  })
+);
+
+// In-memory API monitoring (feeds GET /api/v1/admin/metrics).
+app.use(metricsMiddleware);
 
 // Global soft rate limit (abuse floor)
 app.use(rateLimit(() => 'global', 600, 60_000));

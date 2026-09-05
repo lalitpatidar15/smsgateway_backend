@@ -4,8 +4,18 @@ import { config } from '../config';
 import { asyncHandler, httpError, requireAdmin, audit, AuthedRequest } from '../middleware';
 import { paginate } from '../utils';
 import { fireWebhook } from '../webhooks';
+import { metricsSnapshot } from '../metrics';
 
 export const adminRouter = Router();
+
+// API monitoring snapshot (request counts, error counts, latency per route).
+adminRouter.get(
+  '/metrics',
+  requireAdmin(),
+  asyncHandler(async (_req, res) => {
+    res.json(metricsSnapshot());
+  })
+);
 
 adminRouter.get(
   '/dashboard',
