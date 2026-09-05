@@ -63,6 +63,18 @@ app.get('/health', async (req, res) => {
   });
 });
 
+// Service landing page (browsers, uptime checks hitting /).
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'sms-gateway-backend',
+    status: 'ok',
+    version: '1.0.0',
+    health: '/health',
+    api: '/api/v1/health',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Versioned API
 app.use('/api/v1', healthRouter);
 app.use('/api/v1/auth', authRouter);
