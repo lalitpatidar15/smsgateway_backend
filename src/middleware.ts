@@ -17,6 +17,7 @@ export interface AuthedRequest extends Request {
   admin?: { id: string; email: string; role: string };
   apiKey?: { id: string; name: string; permissions: string[] };
   gateway?: { id: string; deviceId: string; name: string };
+  user?: { id: string; email: string; role: string; organizationId: string };
 }
 
 export function requestIdMiddleware(req: any, _res: any, next: NextFunction) {
@@ -152,6 +153,47 @@ export const requireAdminOrApiKey = asyncHandler(async (req: AuthedRequest, _res
   next();
 });
 
+// User authentication (for end-user portal)
+export const requireUser = asyncHandler(async (req: AuthedRequest, _res: Response, next: NextFunction) => {
+  const token = bearer(req);
+  if (!token) throw httpError(401, 'UNAUTHORIZED', 'Missing bearer token');
+  let payload: any;
+  try {
+    payload = jwt.verify(token, config.jwtSecret);
+  } catch {
+    throw httpError(401, 'UNAUTHORIZED', 'Invalid or expired token');
+  }
+  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+  if (!user || !user.isActive) throw httpError(401, 'UNAUTHORIZED', 'Account disabled');
+  req.user = { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId };
+  next();
+});
+
+// Accept admin JWT OR user JWT (for endpoints usable by both)
+export const requireAdminOrUser = asyncHandler(async (req: AuthedRequest, _res: Response, next: NextFunction) => {
+  const token = bearer(req);
+  if (!token) throw httpError(401, 'UNAUTHORIZED', 'Missing bearer token');
+  let payload: any;
+  try {
+    payload = jwt.verify(token, config.jwtSecret);
+  } catch {
+    throw httpError(401, 'UNAUTHORIZED', 'Invalid or expired token');
+  }
+  // Try admin first
+  const admin = await prisma.adminUser.findUnique({ where: { id: payload.sub } });
+  if (admin && admin.isActive) {
+    req.admin = { id: admin.id, email: admin.email, role: admin.role };
+    return next();
+  }
+  // Try user
+  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+  if (user && user.isActive) {
+    req.user = { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId };
+    return next();
+  }
+  throw httpError(401, 'UNAUTHORIZED', 'Account disabled or not found');
+});
+
 // ---- Rate limiter: in-memory sliding window, or Redis-backed when REDIS_URL is set. ----
 const buckets = new Map<string, number[]>();
 
@@ -199,8 +241,24 @@ export function rateLimit(keyFn: (req: Request) => string, max: number, windowMs
 }
 
 export function audit(action: string, req: AuthedRequest, resourceType?: string, resourceId?: string, metadata?: any) {
-  const actorType = req.admin ? 'admin' : req.apiKey ? 'api_key' : req.gateway ? 'gateway' : 'system';
-  const actorId = req.admin?.id ?? req.apiKey?.id ?? req.gateway?.id ?? null;
+  let actorType: string;
+  let actorId: string | null;
+  if (req.admin) {
+    actorType = 'admin';
+    actorId = req.admin.id;
+  } else if (req.user) {
+    actorType = 'user';
+    actorId = req.user.id;
+  } else if (req.apiKey) {
+    actorType = 'api_key';
+    actorId = req.apiKey.id;
+  } else if (req.gateway) {
+    actorType = 'gateway';
+    actorId = req.gateway.id;
+  } else {
+    actorType = 'system';
+    actorId = null;
+  }
   prisma.auditLog
     .create({
       data: {

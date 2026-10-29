@@ -11,6 +11,8 @@ import { requestIdMiddleware, notFound, errorHandler, rateLimit } from './middle
 import { metricsMiddleware } from './metrics';
 import { healthRouter } from './routes/health';
 import { authRouter } from './routes/auth';
+import { userAuthRouter } from './routes/userAuth';
+import { userRouter } from './routes/user';
 import { apiKeysRouter } from './routes/apiKeys';
 import { gatewaysRouter } from './routes/gateways';
 import { smsRouter } from './routes/sms';
@@ -82,6 +84,8 @@ app.get('/', (_req, res) => {
 // Versioned API
 app.use('/api/v1', healthRouter);
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/user/auth', userAuthRouter);
+app.use('/api/v1/user', userRouter);
 app.use('/api/v1/admin/api-keys', apiKeysRouter);
 app.use('/api/v1/gateways', gatewaysRouter);
 app.use('/api/v1/sms', smsRouter);
@@ -98,6 +102,7 @@ app.use(errorHandler);
 
 async function ensureAdmin() {
   try {
+    if (process.env.SEED_ADMIN !== 'true') return;
     const count = await prisma.adminUser.count();
     if (count === 0) {
       const hash = await (bcrypt as any).hash(config.adminPassword, 10);

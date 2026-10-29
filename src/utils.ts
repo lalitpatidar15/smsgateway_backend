@@ -86,3 +86,13 @@ export function paginate(pageRaw: unknown, limitRaw: unknown, maxLimit = 100) {
   if (limit > maxLimit) limit = maxLimit;
   return { page, limit, skip: (page - 1) * limit, take: limit };
 }
+
+export function generateCode(len = 6): string {
+  let out = '';
+  for (let i = 0; i < len; i++) out += Math.floor(Math.random() * 10);
+  return out;
+}
+
+export function minutesFromSeconds(seconds: number): number {
+  return Math.max(1, Math.round(seconds / 60));
+}
