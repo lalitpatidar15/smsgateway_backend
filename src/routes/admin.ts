@@ -25,7 +25,7 @@ adminRouter.get(
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [total, gateways, today, queued, sent, delivered, failed] = await Promise.all([
+    const [total, gateways, today, queued, sent, delivered, failed, received] = await Promise.all([
       prisma.gatewayDevice.count(),
       prisma.gatewayDevice.findMany({ select: { lastSeenAt: true, status: true } }),
       prisma.smsJob.count({ where: { createdAt: { gte: startOfDay } } }),
@@ -33,6 +33,7 @@ adminRouter.get(
       prisma.smsJob.count({ where: { status: 'SENT' as any } }),
       prisma.smsJob.count({ where: { status: 'DELIVERED' as any } }),
       prisma.smsJob.count({ where: { status: 'FAILED' as any } }),
+      prisma.inboundSms.count({ where: { receivedAt: { gte: startOfDay } } }),
     ]);
 
     let online = 0;
@@ -43,7 +44,7 @@ adminRouter.get(
 
     res.json({
       gateways: { total, online, offline: total - online },
-      sms: { today, queued, sent, delivered, failed },
+      sms: { today, queued, sent, delivered, failed, received },
     });
   })
 );

@@ -5,6 +5,7 @@ import { config } from './config';
 import { prisma } from './db';
 import { hashToken, getClientIp } from './utils';
 import { logger } from './logger';
+import { getRedis } from './redis';
 
 export interface AuthedRequest extends Request {
   requestId: string;
@@ -151,26 +152,49 @@ export const requireAdminOrApiKey = asyncHandler(async (req: AuthedRequest, _res
   next();
 });
 
-// ---- Simple in-memory rate limiter (per-process). For multi-instance use Redis. ----
+// ---- Rate limiter: in-memory sliding window, or Redis-backed when REDIS_URL is set. ----
 const buckets = new Map<string, number[]>();
+
+function consumeMemory(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const arr = buckets.get(key) ?? [];
+  const fresh = arr.filter((t) => now - t < windowMs);
+  if (fresh.length >= max) return false;
+  fresh.push(now);
+  buckets.set(key, fresh);
+  return true;
+}
+
+async function consumeRedis(key: string, max: number, windowMs: number): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return consumeMemory(key, max, windowMs);
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  try {
+    const count = await redis.zcount(key, windowStart, now);
+    if (count >= max) return false;
+    await redis.zadd(key, now, `${now}:${Math.random()}`);
+    await redis.expire(key, Math.ceil(windowMs / 1000) + 60);
+    return true;
+  } catch {
+    return consumeMemory(key, max, windowMs);
+  }
+}
 
 export function rateLimit(keyFn: (req: Request) => string, max: number, windowMs: number) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (max <= 0) return next();
     const key = keyFn(req);
-    const now = Date.now();
-    const arr = buckets.get(key) ?? [];
-    const fresh = arr.filter((t) => now - t < windowMs);
-    if (fresh.length >= max) {
-      res.setHeader('Retry-After', Math.ceil(windowMs / 1000));
-      return res.status(429).json({
-        success: false,
-        error: { code: 'RATE_LIMITED', message: 'Too many requests', requestId: (req as any).requestId },
-      });
-    }
-    fresh.push(now);
-    buckets.set(key, fresh);
-    next();
+    consumeRedis(key, max, windowMs).then((allowed) => {
+      if (!allowed) {
+        res.setHeader('Retry-After', Math.ceil(windowMs / 1000));
+        return res.status(429).json({
+          success: false,
+          error: { code: 'RATE_LIMITED', message: 'Too many requests', requestId: (req as any).requestId },
+        });
+      }
+      next();
+    }).catch(() => next());
   };
 }
 

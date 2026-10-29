@@ -14,17 +14,20 @@ import { authRouter } from './routes/auth';
 import { apiKeysRouter } from './routes/apiKeys';
 import { gatewaysRouter } from './routes/gateways';
 import { smsRouter } from './routes/sms';
+import { otpRouter } from './routes/otp';
+import { complianceRouter } from './routes/compliance';
 import { adminRouter } from './routes/admin';
 import { webhooksRouter } from './routes/webhooks';
 import { legacyRouter } from './routes/legacy';
-import { startScheduler } from './scheduler';
+import { startScheduler, stopScheduler } from './scheduler';
 
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-const origins = config.corsOrigins === '*' ? '*' : config.corsOrigins.split(',').map((s) => s.trim()).filter(Boolean);
+const isProd = process.env.NODE_ENV === 'production';
+const origins = config.corsOrigins === '*' ? (isProd ? ['http://localhost:5173'] : '*') : config.corsOrigins.split(',').map((s) => s.trim()).filter(Boolean);
 app.use(
   cors({
     origin: origins === '*' ? true : (origins as string[]),
@@ -32,6 +35,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(requestIdMiddleware);
 app.use((req, res, next) => {
   res.setHeader('X-Request-Id', (req as any).requestId);
@@ -81,6 +85,8 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/admin/api-keys', apiKeysRouter);
 app.use('/api/v1/gateways', gatewaysRouter);
 app.use('/api/v1/sms', smsRouter);
+app.use('/api/v1/otp', otpRouter);
+app.use('/api/v1/compliance', complianceRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/webhooks', webhooksRouter);
 
@@ -112,12 +118,13 @@ const server = app.listen(PORT, async () => {
   logger.info(`postgres: ${pg}`);
   if (pg !== 'ok') logger.error('Database not reachable — check DATABASE_URL');
   await ensureAdmin();
-  startScheduler();
+  await startScheduler();
 });
 
 function shutdown(signal: string) {
   logger.info(`received ${signal}, shutting down`);
   server.close(async () => {
+    await stopScheduler();
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   });

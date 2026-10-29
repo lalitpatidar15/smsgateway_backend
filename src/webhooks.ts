@@ -8,7 +8,7 @@ export async function createEndpoint(url: string, events: string[], gatewayDevic
     data: {
       url,
       secret: randomSecret(24),
-      events: events && events.length > 0 ? events : ['sms.sent', 'sms.delivered', 'sms.failed'],
+      events: events && events.length > 0 ? events : ['sms.sent', 'sms.delivered', 'sms.failed', 'sms.received'],
       gatewayDeviceId: gatewayDeviceId ?? null,
       isActive: true,
     },
@@ -21,24 +21,30 @@ function delayForAttempt(attempt: number): number {
   return arr[Math.min(attempt - 1, arr.length - 1)] ?? 60000;
 }
 
-export function fireWebhook(event: string, smsJob: any) {
+export type WebhookEntityType = 'job' | 'inbound';
+
+export function fireWebhook(event: string, entity: any, entityType: WebhookEntityType = 'job') {
   // fire-and-forget; errors handled internally
-  dispatchWebhook(event, smsJob).catch((e) => logger.warn('webhook dispatch failed', { event, error: (e as Error).message }));
+  dispatchWebhook(event, entity, entityType).catch((e) => logger.warn('webhook dispatch failed', { event, error: (e as Error).message }));
 }
 
-async function dispatchWebhook(event: string, smsJob: any) {
+async function dispatchWebhook(event: string, entity: any, entityType: WebhookEntityType) {
   const endpoints = await prisma.webhookEndpoint.findMany({ where: { isActive: true } });
   const targets = endpoints.filter((ep) => {
-    if (ep.gatewayDeviceId && smsJob?.gatewayDeviceId && ep.gatewayDeviceId !== smsJob.gatewayDeviceId) return false;
+    if (ep.gatewayDeviceId && entity?.gatewayDeviceId && ep.gatewayDeviceId !== entity.gatewayDeviceId) return false;
     if (ep.events && ep.events.length > 0 && !ep.events.includes(event) && !ep.events.includes('*')) return false;
     return true;
   });
   for (const ep of targets) {
-    const payload = { event, job: smsJob, timestamp: new Date().toISOString() };
+    const payload = {
+      event,
+      ...(entityType === 'job' ? { job: entity } : { inbound: entity }),
+      timestamp: new Date().toISOString(),
+    };
     const delivery = await prisma.webhookDelivery.create({
       data: {
         webhookEndpointId: ep.id,
-        smsJobId: smsJob?.id ?? null,
+        smsJobId: entityType === 'job' ? entity?.id ?? null : null,
         event,
         payload: payload as any,
         status: 'PENDING',

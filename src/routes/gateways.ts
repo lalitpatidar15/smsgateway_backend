@@ -3,6 +3,8 @@ import { prisma } from '../db';
 import { config } from '../config';
 import { asyncHandler, httpError, requireAdmin, requireGateway, audit, AuthedRequest, rateLimit } from '../middleware';
 import { hashToken, randomSecret, getClientIp } from '../utils';
+import { fireWebhook } from '../webhooks';
+import { createAlert } from '../alerts';
 
 export const gatewaysRouter = Router();
 
@@ -239,6 +241,19 @@ gatewaysRouter.post(
     if (providerReference) data.providerReference = String(providerReference).slice(0, 100);
 
     const updated = await prisma.smsJob.update({ where: { id: job.id }, data });
+    if ((updated.status as string) === 'FAILED') {
+      await prisma.deadLetterJob
+        .create({
+          data: {
+            smsJobId: job.id,
+            jobId: job.id,
+            reason: String(errorCode ?? 'FAILED'),
+            payload: { jobId: job.id, recipient: job.recipient, message: job.message },
+          },
+        })
+        .catch(() => {});
+      createAlert('critical', 'sms_gateway', `SMS job ${job.id} final failure: ${String(errorCode ?? 'FAILED')}`);
+    }
 
     // Record attempt
     await prisma.smsAttempt
@@ -265,6 +280,74 @@ gatewaysRouter.post(
     if (mapped === 'FAILED' && (updated.status as string) === 'FAILED') fireWebhook('sms.failed', updated);
 
     res.json({ success: true });
+  })
+);
+
+gatewaysRouter.post(
+  '/incoming',
+  requireGateway,
+  rateLimit((req: any) => `inbound:${req.gateway?.id}`, config.rateGatewayPerMinute * 2, 60_000),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const list = Array.isArray(req.body?.messages) ? (req.body.messages as any[]) : null;
+    if (!list || list.length === 0) throw httpError(400, 'VALIDATION_ERROR', 'messages[] required');
+    if (list.length > 100) throw httpError(400, 'VALIDATION_ERROR', 'Max 100 messages per batch');
+    const gatewayId = req.gateway!.id;
+
+    let received = 0;
+    let skipped = 0;
+    const ids: string[] = [];
+
+    for (const m of list) {
+      const sender = String(m?.sender ?? '').trim().slice(0, 32);
+      const message = String(m?.message ?? '');
+      if (!sender || !message || message.length > 5000) {
+        skipped++;
+        continue;
+      }
+      const clientMessageId = m?.clientMessageId ? String(m.clientMessageId).slice(0, 128) : null;
+      const parsedAt = m?.receivedAt ? new Date(String(m.receivedAt)) : new Date();
+      const receivedAt = isNaN(parsedAt.getTime()) ? new Date() : parsedAt;
+
+      const rawSlot = m?.slotIndex ?? m?.simSlot;
+      const slotIndex =
+        rawSlot !== undefined && rawSlot !== null && Number.isInteger(Number(rawSlot)) && Number(rawSlot) >= 0
+          ? Number(rawSlot)
+          : null;
+      let gatewaySimId: string | null = null;
+      if (slotIndex !== null) {
+        const sim = await prisma.gatewaySim.findUnique({
+          where: { gatewayDeviceId_slotIndex: { gatewayDeviceId: gatewayId, slotIndex } },
+        });
+        gatewaySimId = sim?.id ?? null;
+      }
+
+      try {
+        const inbound = await prisma.inboundSms.create({
+          data: {
+            gatewayDeviceId: gatewayId,
+            gatewaySimId,
+            clientMessageId,
+            sender,
+            message,
+            receivedAt,
+            simSlot: slotIndex,
+            subscriptionId: m?.subscriptionId !== undefined && m?.subscriptionId !== null ? String(m.subscriptionId).slice(0, 32) : null,
+          },
+        });
+        received++;
+        ids.push(inbound.id);
+        fireWebhook('sms.received', inbound, 'inbound');
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          skipped++;
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    if (received > 0) audit('sms.inbound', req, 'inbound', null, { received, skipped });
+    res.status(201).json({ received, skipped, ids });
   })
 );
 

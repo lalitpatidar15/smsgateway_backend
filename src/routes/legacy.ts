@@ -4,6 +4,7 @@ import { config } from '../config';
 import { asyncHandler, httpError, requireGateway, AuthedRequest, rateLimit, audit } from '../middleware';
 import { hashToken, randomSecret, getClientIp, validatePhone, validateMessage, smsSegments } from '../utils';
 import { fireWebhook } from '../webhooks';
+import { createOne } from './sms';
 
 export const legacyRouter = Router();
 
@@ -128,25 +129,20 @@ legacyRouter.post(
   rateLimit((req) => `legacy-sms:${req.ip}`, 30, 60_000),
   asyncHandler(async (req: AuthedRequest, res) => {
     const b = req.body ?? {};
-    const phone = validatePhone(b.to ?? b.recipient);
-    if (!phone.ok) throw httpError(400, 'VALIDATION_ERROR', phone.error!);
-    const msg = validateMessage(b.message);
-    if (!msg.ok) throw httpError(400, 'VALIDATION_ERROR', msg.error!);
-    const { encoding, segmentCount } = smsSegments(String(b.message));
-    const job = await prisma.smsJob.create({
-      data: {
-        recipient: phone.normalized,
-        message: String(b.message),
-        status: 'QUEUED' as any,
-        priority: 'NORMAL' as any,
-        maxAttempts: config.smsMaxAttempts,
-        segmentCount,
-        encoding,
-      },
+    const { job, idempotent } = await createOne({
+      to: b.to ?? b.recipient,
+      message: b.message ?? b.body,
+      scheduledAt: b.scheduledAt ?? b.scheduled_at,
+      priority: b.priority,
+      idempotencyKey: b.idempotencyKey ?? b.idempotency_key,
+      externalId: b.externalId ?? b.external_id,
+      metadata: b.metadata,
+      apiKeyId: null,
+      actorReq: req,
     });
     audit('sms.create', req, 'sms', job.id, { to: job.recipient, legacy: true });
     fireWebhook('sms.created', job);
-    res.status(201).json({ id: job.id, status: job.status, recipient: job.recipient });
+    res.status(201).json({ id: job.id, status: job.status, recipient: job.recipient, ...(idempotent ? { idempotent: true } : {}) });
   })
 );
 

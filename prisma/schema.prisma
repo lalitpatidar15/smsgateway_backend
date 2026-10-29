@@ -63,6 +63,8 @@ model AdminUser {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  organizationMembers OrganizationMember[]
+
   @@map("admin_users")
 }
 
@@ -110,6 +112,7 @@ model GatewayDevice {
   smsJobs         SmsJob[]
   smsAttempts     SmsAttempt[]
   webhookEndpoints WebhookEndpoint[]
+  inboundSms      InboundSms[]
 
   @@map("gateway_devices")
 }
@@ -130,6 +133,7 @@ model GatewaySim {
   gateway GatewayDevice @relation(fields: [gatewayDeviceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   smsJobs SmsJob[]
   smsAttempts SmsAttempt[]
+  inboundSms InboundSms[]
 
   @@unique([gatewayDeviceId, slotIndex])
   @@map("gateway_sims")
@@ -174,6 +178,29 @@ model SmsJob {
   @@index([recipient], name: "sms_jobs_recipient_idx")
   @@index([createdAt], name: "sms_jobs_created_at_idx")
   @@map("sms_jobs")
+}
+
+model InboundSms {
+  id              String    @id @default(uuid())
+  gatewayDeviceId String    @map("gateway_device_id")
+  gatewaySimId    String?   @map("gateway_sim_id")
+  clientMessageId String?   @unique @map("client_message_id")
+  sender          String
+  message         String
+  receivedAt      DateTime  @map("received_at")
+  simSlot         Int?      @map("sim_slot")
+  subscriptionId  String?   @map("subscription_id")
+  readAt          DateTime? @map("read_at")
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  gateway GatewayDevice @relation(fields: [gatewayDeviceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sim     GatewaySim?   @relation(fields: [gatewaySimId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([gatewayDeviceId, receivedAt], name: "inbound_sms_gateway_received_idx")
+  @@index([receivedAt], name: "inbound_sms_received_at_idx")
+  @@index([sender], name: "inbound_sms_sender_idx")
+  @@map("inbound_sms")
 }
 
 model SmsAttempt {
@@ -231,6 +258,96 @@ model WebhookDelivery {
   smsJob   SmsJob?         @relation(fields: [smsJobId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@map("webhook_deliveries")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members OrganizationMember[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id              String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  adminUserId    String   @map("admin_user_id")
+  role            String   @default("ADMIN")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  admin        AdminUser   @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, adminUserId])
+  @@map("organization_members")
+}
+
+model OtpSession {
+  id         String    @id @default(uuid())
+  phone      String    @map("phone")
+  purpose    String
+  codeHash   String    @map("code_hash")
+  status     String    @default("PENDING")
+  attempts   Int       @default(0) @map("attempts")
+  expiresAt  DateTime  @map("expires_at")
+  verifiedAt DateTime? @map("verified_at")
+  verifiedBy String?    @map("verified_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([phone, purpose, status])
+  @@index([expiresAt])
+  @@map("otp_sessions")
+}
+
+model SuppressionList {
+  id        String   @id @default(uuid())
+  phone     String
+  sender    String?
+  purpose   String?
+  reason    String?
+  expiresAt DateTime?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("suppression_lists")
+}
+
+model SenderIdentity {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  name      String?
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("sender_identities")
+}
+
+model Template {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("templates")
+}
+
+model DeadLetterJob {
+  id        String   @id @default(uuid())
+  smsJobId  String
+  jobId     String?
+  reason    String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("dead_letter_jobs")
 }
 
 model AuditLog {

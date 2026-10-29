@@ -4,6 +4,7 @@ import { config } from '../config';
 import { asyncHandler, httpError, requireApiKey, requireAdminOrApiKey, audit, AuthedRequest, rateLimit } from '../middleware';
 import { validatePhone, validateMessage, smsSegments, paginate } from '../utils';
 import { fireWebhook } from '../webhooks';
+import { getSmsProvider } from '../providers';
 
 export const smsRouter = Router();
 
@@ -26,7 +27,7 @@ async function checkLimits(apiKeyId: string | null, recipient: string) {
   }
 }
 
-async function createOne(opts: {
+export async function createOne(opts: {
   to: unknown;
   message: unknown;
   scheduledAt?: unknown;
@@ -36,6 +37,7 @@ async function createOne(opts: {
   metadata?: unknown;
   apiKeyId: string | null;
   actorReq: AuthedRequest;
+  provider?: unknown;
 }) {
   const phone = validatePhone(opts.to);
   if (!phone.ok) throw httpError(400, 'VALIDATION_ERROR', phone.error!);
@@ -73,24 +75,59 @@ async function createOne(opts: {
 
   await checkLimits(opts.apiKeyId, phone.normalized);
 
-  const { encoding, segmentCount } = smsSegments(message);
-
-  const job = await prisma.smsJob.create({
-    data: {
-      recipient: phone.normalized,
-      message,
-      status,
-      priority: priority as any,
-      apiKeyId: opts.apiKeyId,
-      idempotencyKey: opts.idempotencyKey ? String(opts.idempotencyKey) : null,
-      externalId: opts.externalId ? String(opts.externalId) : null,
-      scheduledAt,
-      maxAttempts: config.smsMaxAttempts,
-      segmentCount,
-      encoding,
-      metadata: (opts.metadata as any) ?? undefined,
+  const suppression = await prisma.suppressionList.findFirst({
+    where: {
+      phone: phone.normalized,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
   });
+  if (suppression) {
+    throw httpError(400, 'SUPPRESSED', 'Recipient is suppressed');
+  }
+
+  const { encoding, segmentCount } = smsSegments(message);
+
+  let job: any;
+  if (opts.provider) {
+    const provider = getSmsProvider(String(opts.provider));
+    const result = await provider!.send({ to: phone.normalized, message, idempotencyKey: opts.idempotencyKey ? String(opts.idempotencyKey) : undefined });
+    status = 'SENT';
+    job = await prisma.smsJob.create({
+      data: {
+        recipient: phone.normalized,
+        message,
+        status: 'SENT' as any,
+        priority: priority as any,
+        apiKeyId: opts.apiKeyId,
+        idempotencyKey: opts.idempotencyKey ? String(opts.idempotencyKey) : null,
+        externalId: opts.externalId ? String(opts.externalId) : null,
+        scheduledAt,
+        maxAttempts: config.smsMaxAttempts,
+        segmentCount,
+        encoding,
+        metadata: (opts.metadata as any) ?? undefined,
+        providerReference: result.providerMessageId,
+        sentAt: new Date(),
+      },
+    });
+  } else {
+    job = await prisma.smsJob.create({
+      data: {
+        recipient: phone.normalized,
+        message,
+        status,
+        priority: priority as any,
+        apiKeyId: opts.apiKeyId,
+        idempotencyKey: opts.idempotencyKey ? String(opts.idempotencyKey) : null,
+        externalId: opts.externalId ? String(opts.externalId) : null,
+        scheduledAt,
+        maxAttempts: config.smsMaxAttempts,
+        segmentCount,
+        encoding,
+        metadata: (opts.metadata as any) ?? undefined,
+      },
+    });
+  }
   audit('sms.create', opts.actorReq, 'sms', job.id, { to: job.recipient, status });
   fireWebhook('sms.created', job);
   return { job, idempotent: false };
@@ -112,6 +149,7 @@ smsRouter.post(
       metadata: b.metadata,
       apiKeyId: req.apiKey!.id,
       actorReq: req,
+      provider: b.provider,
     });
     res.status(201).json({ id: job.id, status: job.status, ...(idempotent ? { idempotent: true } : {}) });
   })
@@ -137,6 +175,7 @@ smsRouter.post(
           metadata: undefined,
           apiKeyId: req.apiKey!.id,
           actorReq: req,
+          provider: m.provider,
         });
         out.push({ id: job.id, status: job.status, ...(idempotent ? { idempotent: true } : {}) });
       } catch (e: any) {
@@ -171,6 +210,46 @@ smsRouter.get(
       prisma.smsJob.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, include: { attempts: { orderBy: { startedAt: 'desc' }, take: 10 } } }),
     ]);
     res.json({ data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  })
+);
+
+smsRouter.get(
+  '/incoming',
+  requireAdminOrApiKey,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const q: any = req.query ?? {};
+    const { page, limit, skip, take } = paginate(q.page, q.limit);
+    const where: any = {};
+    if (q.sender && typeof q.sender === 'string') where.sender = { contains: q.sender };
+    if (q.gatewayId && typeof q.gatewayId === 'string') where.gatewayDeviceId = q.gatewayId;
+    if (q.unread === 'true') where.readAt = null;
+    if (q.unread === 'false') where.readAt = { not: null };
+    if (q.from) {
+      const d = new Date(String(q.from));
+      if (!isNaN(d.getTime())) where.receivedAt = { ...(where.receivedAt ?? {}), gte: d };
+    }
+    if (q.to) {
+      const d = new Date(String(q.to));
+      if (!isNaN(d.getTime())) where.receivedAt = { ...(where.receivedAt ?? {}), lte: d };
+    }
+    const [total, data] = await Promise.all([
+      prisma.inboundSms.count({ where }),
+      prisma.inboundSms.findMany({ where, orderBy: { receivedAt: 'desc' }, skip, take }),
+    ]);
+    res.json({ data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  })
+);
+
+smsRouter.post(
+  '/incoming/:id/read',
+  requireAdminOrApiKey,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const msg = await prisma.inboundSms.findUnique({ where: { id: req.params.id } });
+    if (!msg) throw httpError(404, 'NOT_FOUND', 'Message not found');
+    const updated = msg.readAt
+      ? msg
+      : await prisma.inboundSms.update({ where: { id: msg.id }, data: { readAt: new Date() } });
+    res.json(updated);
   })
 );
 
